@@ -1,0 +1,23 @@
+{
+    "host": "localhost",
+    "port": 8080,
+    "datasets_dir": "data",
+    "datasets": {
+        "fineweb_edu_train": {
+            "data_file": "fineweb-edu-sample/train_0.bin",
+            "token_size_bits": 17,
+            "tokenizer": {
+                "document_separator_token": 128001,
+                "vocab_size": 128256
+            }
+        },
+        "fineweb_edu_val": {
+            "data_file": "fineweb-edu-sample/val_1.bin",
+            "token_size_bits": 17,
+            "tokenizer": {
+                "document_separator_token": 128001,
+                "vocab_size": 128256
+            }
+        }
+    }
+} 

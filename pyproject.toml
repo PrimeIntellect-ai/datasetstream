@@ -1,0 +1,12 @@
+[project]
+name = "datasetstream"
+version = "0.1.0"
+description = "A simple performant dataset streaming server & client for tokenized webtext datasets"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["aiohttp", "numpy", "numba"]
+
+[project.optional-dependencies]
+test = [
+    "pytest", "pytest-asyncio", "transformers", "torch", "tqdm", "tiktoken"
+]
