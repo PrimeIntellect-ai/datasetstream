@@ -6,8 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.random import Generator, PCG64
 
-from src.datasetstream import nibble_utils, math_utils
-from src.datasetstream.utils import UINT_DTYPE_MAP, get_np_dtype
+from datasetstream import nibble_utils, math_utils
 
 
 @dataclass

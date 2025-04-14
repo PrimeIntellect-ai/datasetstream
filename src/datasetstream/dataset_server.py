@@ -7,8 +7,8 @@ from aiohttp import web
 from aiohttp import WSMsgType
 
 from config import ServerConfig, ServerState, ConfigError
-from src.datasetstream.dataset import TokenDatasetIterator, TokenDataset, CompoundDataset, CompoundDatasetIterator
-from src.datasetstream.utils import get_np_dtype
+from datasetstream.dataset import TokenDataset, CompoundDataset, CompoundDatasetIterator
+from datasetstream.utils import get_np_dtype
 
 
 class DatasetServer:

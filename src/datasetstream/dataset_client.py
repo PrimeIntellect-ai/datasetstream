@@ -3,7 +3,7 @@ from typing import AsyncIterator, Optional, Iterator
 import aiohttp
 import numpy as np
 
-from src.datasetstream.utils import get_np_dtype
+from datasetstream.utils import get_np_dtype
 
 
 
