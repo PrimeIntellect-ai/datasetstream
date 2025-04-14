@@ -7,7 +7,7 @@ from aiohttp import web
 from aiohttp import WSMsgType
 
 from config import ServerConfig, ServerState, ConfigError
-from src.datasetstream.dataset import DatasetIterator, TokenDataset
+from src.datasetstream.dataset import TokenDatasetIterator, TokenDataset, CompoundDataset, CompoundDatasetIterator
 from src.datasetstream.utils import get_np_dtype
 
 
@@ -24,7 +24,9 @@ class DatasetServer:
 
         self.datasets = {}
         for dataset_id, dataset_config in self.config.dataset_configs.items():
-            self.datasets[dataset_id] = TokenDataset(dataset_config)
+            self.datasets[dataset_id] = CompoundDataset(
+                [TokenDataset(file_path, dataset_config.token_size_bits) for file_path in dataset_config.data_files]
+            )
 
         self.state = ServerState(self.config)
         self.app = web.Application()
@@ -90,7 +92,7 @@ class DatasetServer:
         seq_len = int(seq_len_header)
 
         dataset = self.datasets[dataset_id]
-        dataset_iterator = DatasetIterator(dataset, batch_size, seq_len, seed, shuffle=False)
+        dataset_iterator = CompoundDatasetIterator(dataset, batch_size, seq_len, seed, shuffle=False)
 
         # Add connection to active connections
         self.state.increment_connections(dataset_id)
@@ -101,14 +103,17 @@ class DatasetServer:
         print(f"New connection to dataset {dataset_id} with seed={seed}, batch_size={batch_size}")
 
         # determine token size in bytes
+        dataset_config = self.config.dataset_configs[dataset_id]
+        n_bits = dataset_config.token_size_bits
+
         token_size_bytes = 0
-        if dataset.n_bits <= 8:
+        if n_bits <= 8:
             token_size_bytes = 1
-        elif dataset.n_bits <= 16:
+        elif n_bits <= 16:
             token_size_bytes = 2
-        elif dataset.n_bits <= 32:
+        elif n_bits <= 32:
             token_size_bytes = 4
-        elif dataset.n_bits <= 64:
+        elif n_bits <= 64:
             token_size_bytes = 8
         token_dtype = get_np_dtype(token_size_bytes)
 

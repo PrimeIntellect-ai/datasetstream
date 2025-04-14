@@ -4,7 +4,7 @@
     "datasets_dir": "data",
     "datasets": {
         "fineweb_edu_train": {
-            "data_file": "fineweb-edu-sample/train_0.bin",
+            "data_files": ["fineweb-edu-sample/train_0.bin", "fineweb-edu-sample/train_1.bin"],
             "token_size_bits": 17,
             "tokenizer": {
                 "document_separator_token": 128001,
@@ -12,7 +12,7 @@
             }
         },
         "fineweb_edu_val": {
-            "data_file": "fineweb-edu-sample/val_1.bin",
+            "data_files": ["fineweb-edu-sample/val_1.bin"],
             "token_size_bits": 17,
             "tokenizer": {
                 "document_separator_token": 128001,

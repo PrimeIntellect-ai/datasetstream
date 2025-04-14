@@ -2,13 +2,13 @@ from pathlib import Path
 import numpy as np
 import json
 import pytest
-from src.datasetstream.dataset import TokenDataset, DatasetConfig, TokenizerConfig, DatasetIterator
+from src.datasetstream.dataset import TokenDataset, DatasetConfig, TokenizerConfig, TokenDatasetIterator
 
 
 def test_dataset_basic_functionality():
     """Test basic dataset functionality without any tokenizer dependencies"""
     config = DatasetConfig(
-        data_file_path=Path("data/fineweb-edu-sample/train_0.bin"),
+        data_files=[Path("data/fineweb-edu-sample/train_0.bin")],
         token_size_bits=16,
         tokenizer_config=TokenizerConfig(
             document_separator_token=50256,
@@ -16,7 +16,7 @@ def test_dataset_basic_functionality():
         )
     )
 
-    dataset = TokenDataset(config)
+    dataset = TokenDataset(config.data_files[0], config.token_size_bits)
 
     # Test basic properties
     assert dataset.num_tokens > 0, "Dataset should not be empty"
@@ -37,7 +37,7 @@ def test_dataset_basic_functionality():
 def test_dataset_iterator():
     """Test the dataset iterator functionality"""
     config = DatasetConfig(
-        data_file_path=Path("data/fineweb-edu-sample/train_0.bin"),
+        data_files=[Path("data/fineweb-edu-sample/train_0.bin")],
         token_size_bits=17,
         tokenizer_config=TokenizerConfig(
             document_separator_token=128001,
@@ -45,8 +45,8 @@ def test_dataset_iterator():
         )
     )
 
-    dataset = TokenDataset(config)
-    iterator = DatasetIterator(dataset, seq_len=64, seed=42, batch_size=32)
+    dataset = TokenDataset(config.data_files[0], config.token_size_bits)
+    iterator = TokenDatasetIterator(dataset, seq_len=64, seed=42, batch_size=32)
 
     # Test we can get multiple sequences
     sequences = [next(iterator) for _ in range(5)]
@@ -63,7 +63,7 @@ def test_dataset_config_from_json(tmp_path):
     """Test loading dataset config from JSON"""
     # Test valid config
     valid_config = {
-        "data_file_path": "data/fineweb-edu-sample/train_0.bin",
+        "data_files": ["data/fineweb-edu-sample/train_0.bin"],
         "token_size_bits": 17,
         "tokenizer_config": {
             "document_separator_token": 128001,
@@ -76,12 +76,12 @@ def test_dataset_config_from_json(tmp_path):
 
     config = DatasetConfig.from_json(config_path)
     assert isinstance(config, DatasetConfig)
-    assert config.data_file_path == Path("data/fineweb-edu-sample/train_0.bin")
+    assert config.data_files == [Path("data/fineweb-edu-sample/train_0.bin")]
     assert config.token_size_bits == 17
     assert config.tokenizer_config.document_separator_token == 128001
     assert config.tokenizer_config.vocab_size == 128256
 
-    # Test missing data_file_path
+    # Test missing data_files
     invalid_config = {
         "token_size_bits": 17,
         "tokenizer_config": {
@@ -93,12 +93,12 @@ def test_dataset_config_from_json(tmp_path):
     with open(config_path, "w") as f:
         json.dump(invalid_config, f)
 
-    with pytest.raises(ValueError, match="Missing required field: data_file_path"):
+    with pytest.raises(ValueError, match="Missing required field: data_files"):
         DatasetConfig.from_json(config_path)
 
     # Test missing tokenizer_config
     invalid_config = {
-        "data_file_path": "data/fineweb-edu-sample/train_0.bin"
+        "data_files": "data/fineweb-edu-sample/train_0.bin"
     }
     config_path = tmp_path / "missing_tokenizer_config.json"
     with open(config_path, "w") as f:
@@ -109,7 +109,7 @@ def test_dataset_config_from_json(tmp_path):
 
     # Test missing tokenizer fields
     invalid_config = {
-        "data_file_path": "data/fineweb-edu-sample/train_0.bin",
+        "data_files": ["data/fineweb-edu-sample/train_0.bin"],
         "token_size_bits": 17,
         "tokenizer_config": {
             "document_separator_token": 128001

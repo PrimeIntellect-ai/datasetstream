@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
 import json
 from pathlib import Path
 import numpy as np
@@ -26,7 +26,7 @@ class TokenizerConfig:
 @dataclass
 class DatasetConfig:
     """Configuration for the binary token dataset"""
-    data_file_path: Path
+    data_files: List[Path]
     tokenizer_config: TokenizerConfig
     token_size_bits: int
 
@@ -36,8 +36,8 @@ class DatasetConfig:
         with open(json_path) as f:
             data = json.load(f)
 
-        if 'data_file_path' not in data:
-            raise ValueError("Missing required field: data_file_path")
+        if 'data_files' not in data:
+            raise ValueError("Missing required field: data_files")
 
         if 'tokenizer_config' not in data:
             raise ValueError("Missing required field: tokenizer_config")
@@ -79,7 +79,7 @@ class DatasetConfig:
         )
 
         return DatasetConfig(
-            data_file_path=Path(data['data_file_path']),
+            data_files=[Path(file) for file in data['data_files']],
             tokenizer_config=tokenizer_config,
             token_size_bits=token_size_bits
         )
@@ -93,21 +93,22 @@ class TokenDataset:
     widths.
     """
 
-    def __init__(self, config):
+    def __init__(self, data_file: Path, token_size_bits: int):
         """
-        config must have at least:
-        - config.data_file_path: str
-        - config.token_size_bits: int
-        - config.tokenizer_config.document_separator_token: int
+        Initialize a TokenDataset with direct parameters.
+        
+        Args:
+            data_file: Path to the data file
+            token_size_bits: Number of bits per token
         """
-        if not os.path.isfile(config.data_file_path):
-            raise ValueError(f"File not found: {config.data_file_path}")
+        if not os.path.isfile(data_file):
+            raise ValueError(f"File not found: {data_file}")
 
-        self.config = config
-        self.n_bits = config.token_size_bits
+        self.data_file = data_file
+        self.n_bits = token_size_bits
 
         # Memory-map the file as raw bytes:
-        self.data = np.memmap(config.data_file_path, dtype=np.uint8, mode='r')
+        self.data = np.memmap(data_file, dtype=np.uint8, mode='r')
         self.file_size_bytes = self.data.shape[0]
 
         # Number of tokens in the file:
@@ -146,9 +147,9 @@ class TokenDataset:
         return np.array(tokens, dtype=np.int64)
 
 
-class DatasetIterator:
+class TokenDatasetIterator:
     """
-    Same as before. The difference is that read_sequence now
+    Iterator for a single TokenDataset. The difference is that read_sequence now
     deals with bits internally. The interface is unchanged.
     """
 
@@ -186,4 +187,75 @@ class DatasetIterator:
                 # If read_sequence fails, pick a new random position
                 self.positions[current_batch_size] = self.rng.integers(0, self.dataset.num_tokens)
 
+        return current_batch
+
+
+class CompoundDataset:
+    """
+    A dataset that combines multiple TokenDatasets and allows sampling from them.
+    """
+    
+    def __init__(self, datasets: List[TokenDataset]):
+        """
+        Initialize a CompoundDataset with a list of TokenDatasets.
+        
+        Args:
+            datasets: List of TokenDataset objects
+        """
+        if not datasets:
+            raise ValueError("CompoundDataset requires at least one TokenDataset")
+        
+        self.datasets = datasets
+        self.num_datasets = len(datasets)
+
+
+class CompoundDatasetIterator:
+    """
+    Iterator for a CompoundDataset that randomly samples from the underlying datasets.
+    """
+    
+    def __init__(self, dataset: CompoundDataset, batch_size: int, seq_len: int, seed: int, shuffle: bool = True):
+        """
+        Initialize a CompoundDatasetIterator.
+        
+        Args:
+            dataset: The CompoundDataset to iterate over
+            batch_size: Number of sequences to return in each batch
+            seq_len: Length of each sequence
+            seed: Random seed for reproducibility
+            shuffle: Whether to shuffle the data
+        """
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.seq_len = seq_len
+        self.shuffle = shuffle
+        self.rng = Generator(PCG64(seed))
+        
+        # Create iterators for each dataset
+        self.iterators = [
+            TokenDatasetIterator(dataset, 1, seq_len, seed, shuffle)
+            for dataset in dataset.datasets
+        ]
+        
+        # Pre-generate dataset indices if shuffle=False
+        if not shuffle:
+            self.dataset_indices = np.zeros(batch_size, dtype=np.int32)
+            for i in range(batch_size):
+                self.dataset_indices[i] = i % dataset.num_datasets
+    
+    def __next__(self) -> np.ndarray:
+        # We'll store the results in int64 for safety:
+        current_batch = np.zeros((self.batch_size, self.seq_len), dtype=np.int64)
+        
+        # If shuffle, randomize dataset indices each time
+        if self.shuffle:
+            dataset_indices = self.rng.integers(0, self.dataset.num_datasets, self.batch_size)
+        else:
+            dataset_indices = self.dataset_indices
+        
+        # Get sequences from each dataset
+        for i in range(self.batch_size):
+            dataset_idx = dataset_indices[i]
+            current_batch[i] = next(self.iterators[dataset_idx])
+        
         return current_batch

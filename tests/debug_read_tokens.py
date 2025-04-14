@@ -1,6 +1,6 @@
 from pathlib import Path
 import torch
-from src.datasetstream.dataset import TokenDataset, DatasetConfig, TokenizerConfig, DatasetIterator
+from src.datasetstream.dataset import TokenDataset, DatasetConfig, TokenizerConfig, TokenDatasetIterator
 from src.datasetstream.tokenizer.detokenizer import HuggingfaceDetokenizer
 
 
@@ -8,7 +8,7 @@ def test_read_and_detokenize_sequences():
     """Test reading and detokenizing sequences from OpenWebText dataset"""
     
     config = DatasetConfig(
-        data_file_path=Path("data/fineweb-edu-sample/train_0.bin"),
+        data_files=[Path("data/fineweb-edu-sample/train_0.bin")],
         token_size_bits=17,
         tokenizer_config=TokenizerConfig(
             document_separator_token=128001,
@@ -16,8 +16,8 @@ def test_read_and_detokenize_sequences():
         )
     )
     
-    dataset = TokenDataset(config)
-    iterator = DatasetIterator(dataset, batch_size=1, seq_len=128, seed=42)
+    dataset = TokenDataset(config.data_files[0], config.token_size_bits)
+    iterator = TokenDatasetIterator(dataset, batch_size=1, seq_len=128, seed=42)
     
     print(f"Dataset size: {dataset.num_tokens} tokens")
 

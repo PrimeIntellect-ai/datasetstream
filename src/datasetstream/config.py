@@ -57,9 +57,9 @@ class ServerConfig:
                 if not isinstance(tokenizer_data, dict):
                     raise ConfigError(f"Invalid tokenizer configuration for dataset '{dataset_id}'")
                 
-                data_file = dataset_data.get("data_file")
-                if not data_file:
-                    raise ConfigError(f"Missing data_file for dataset '{dataset_id}'")
+                data_files = dataset_data.get("data_files")
+                if not data_files:
+                    raise ConfigError(f"Missing data_files for dataset '{dataset_id}'")
                 
                 tokenizer_config = TokenizerConfig(
                     document_separator_token=tokenizer_data.get("document_separator_token", DEFAULT_DOC_SEPARATOR),
@@ -67,7 +67,7 @@ class ServerConfig:
                 )
 
                 datasets[dataset_id] = DatasetConfig(
-                    data_file_path=datasets_dir / data_file,
+                    data_files=[datasets_dir / data_file for data_file in data_files],
                     tokenizer_config=tokenizer_config,
                     token_size_bits=dataset_data.get("token_size_bits", DEFAULT_TOKEN_SIZE_BITS)
                 )
@@ -97,10 +97,10 @@ class ServerConfig:
             raise ConfigError("No datasets configured")
 
         for dataset_id, dataset_config in self.dataset_configs.items():
-            if not dataset_config.data_file_path.exists():
+            if any([not path.exists() for path in dataset_config.data_files]):
                 raise ConfigError(
                     f"Data file for dataset '{dataset_id}' does not exist: "
-                    f"{dataset_config.data_file_path}"
+                    f"{dataset_config.data_files}"
                 )
 
 @dataclass
@@ -126,8 +126,8 @@ class ServerState:
         dataset_config = self.config.dataset_configs[dataset_id]
         return {
             "id": dataset_id,
-            "file_path": str(dataset_config.data_file_path),
-            "file_size": dataset_config.data_file_path.stat().st_size,
+            "file_paths": [str(path) for path in dataset_config.data_files],
+            "file_sizes": [path.stat().st_size for path in dataset_config.data_files],
             "active_connections": self.active_connections.get(dataset_id, 0),
             "tokenizer": {
                 "token_size_bits": dataset_config.token_size_bits,
