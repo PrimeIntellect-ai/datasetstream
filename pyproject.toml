@@ -17,6 +17,9 @@ test = [
     "pytest", "pytest-asyncio", "transformers", "torch", "tqdm", "tiktoken"
 ]
 
+[project.scripts]
+dataset_server = "datasetstream.dataset_server:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

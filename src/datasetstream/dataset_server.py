@@ -6,7 +6,7 @@ import numpy as np
 from aiohttp import web
 from aiohttp import WSMsgType
 
-from config import ServerConfig, ServerState, ConfigError
+from datasetstream.config import ServerConfig, ServerState, ConfigError
 from datasetstream.dataset import TokenDataset, CompoundDataset, CompoundDatasetIterator
 from datasetstream.utils import get_np_dtype
 

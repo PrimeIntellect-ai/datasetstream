@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Dict, Optional, Any, Final
 
-from dataset import DatasetConfig, TokenizerConfig
+from datasetstream.dataset import DatasetConfig, TokenizerConfig
 
 # Default values for server configuration
 DEFAULT_HOST: Final = "localhost"
