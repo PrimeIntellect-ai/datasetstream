@@ -8,8 +8,8 @@ from src.datasetstream.tokenizer.detokenizer import HuggingfaceDetokenizer
 
 if __name__ == '__main__':
     def test():
-        dataset_id = "fineweb-edu-train"
-        stream_url = f"http://65.108.32.176:8080/api/v1/datasets/{dataset_id}/stream"
+        dataset_id = "fineweb_edu_val"
+        stream_url = f"http://localhost:8080/api/v1/datasets/{dataset_id}/stream"
 
         # OpenWebText was encoded with the original GPT-2 tokenizer
         detokenizer = HuggingfaceDetokenizer.from_hf("meta-llama/Meta-Llama-3-8B")
