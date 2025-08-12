@@ -1,37 +1,30 @@
-from pathlib import Path
-import torch
-from src.datasetstream.dataset import TokenDataset, DatasetConfig, TokenizerConfig, TokenDatasetIterator
-from src.datasetstream.tokenizer.detokenizer import HuggingfaceDetokenizer
+import time
+
+import numpy as np
+
+from datasetstream.dataset_client import DatasetClientIteratorSync
 
 
-def test_read_and_detokenize_sequences():
-    """Test reading and detokenizing sequences from OpenWebText dataset"""
-    
-    config = DatasetConfig(
-        data_files=[Path("data/fineweb-edu-sample/train_0.bin")],
-        token_size_bits=17,
-        tokenizer_config=TokenizerConfig(
-            document_separator_token=128001,
-            vocab_size=128256,
-        )
-    )
-    
-    dataset = TokenDataset(config.data_files[0], config.token_size_bits)
-    iterator = TokenDatasetIterator(dataset, batch_size=1, seq_len=128, seed=42)
-    
-    print(f"Dataset size: {dataset.num_tokens} tokens")
+def main():
+    dataset_id = "fineweb_edu_val"
+    stream_url = f"http://localhost:8080/api/v1/datasets/{dataset_id}/stream"
 
-    detokenizer = HuggingfaceDetokenizer.from_hf("meta-llama/Meta-Llama-3-8B")
+    start_time = time.perf_counter()
+    with DatasetClientIteratorSync(stream_url, seed=42, batch_size=32, seq_len=1024, prefetch_size=32) as iterator:
+        print(f"Connected to dataset: {dataset_id}")
 
-    # Read and print a few sequences
-    for i in range(5):
-        seq = next(iterator)
-        # Convert to torch tensor for detokenizer
-        tensor = torch.tensor(seq, dtype=torch.int64)
-        text = detokenizer.detokenize(tensor)[0]
-        print(f"\nSequence {i}:")
-        print(text)
-        print("-" * 80)
+        count = 0
+        total_bytes_received = 0
+
+        item: np.array
+        for tokens in iterator:
+            count += 1
+            total_bytes_received += tokens.nbytes
+            end_time = time.perf_counter()
+            time_elapsed = end_time - start_time
+            print(f"Average speed: {total_bytes_received / time_elapsed / (1024 ** 2):.2f} MB/s, "
+                  f"batch {count}, batches/second: {count / time_elapsed:.2f}")
+
 
 if __name__ == '__main__':
-    test_read_and_detokenize_sequences() 
+    main()

@@ -4,9 +4,19 @@ version = "0.1.0"
 description = "A simple performant dataset streaming server & client for tokenized webtext datasets"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["aiohttp", "numpy", "numba"]
+dependencies = [
+    "aiohttp",
+    "numpy",
+    "numba",
+    "torch",
+    "hatchling>=1.27.0",
+]
 
 [project.optional-dependencies]
 test = [
     "pytest", "pytest-asyncio", "transformers", "torch", "tqdm", "tiktoken"
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

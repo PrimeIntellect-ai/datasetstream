@@ -145,7 +145,7 @@ class DatasetServer:
         """Run the dataset server"""
         runner = web.AppRunner(self.app)
         await runner.setup()
-        site = web.TCPSite(runner, self.config.host, self.config.port)
+        site = web.TCPSite(runner, self.config.host, self.config.port, reuse_port=True)
 
         await site.start()
         print(f"Dataset server running at http://{self.config.host}:{self.config.port}")
