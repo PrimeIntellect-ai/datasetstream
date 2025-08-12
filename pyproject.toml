@@ -14,7 +14,8 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "pytest", "pytest-asyncio", "transformers", "torch", "tqdm", "tiktoken"
+    "pytest", "pytest-asyncio", "transformers", "torch", "tqdm", "tiktoken",
+    "llvmlite<0.40.0"
 ]
 
 [project.scripts]
