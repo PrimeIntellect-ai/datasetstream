@@ -1,17 +1,18 @@
 import asyncio
-from typing import AsyncIterator, Optional, Iterator
+from typing import AsyncIterator, Optional, Iterator, List
 import aiohttp
 import numpy as np
 
-from datasetstream.utils import get_np_dtype
-
+from datasetstream.utils import get_np_dtype, unpack_batches
 
 
 class DatasetClientIteratorAsync:
     """
     A single iterator instance for streaming data from a dataset,
     with asynchronous background prefetching.
+    Each yielded item is a list of NumPy arrays (one batch); for legacy single-tensor streams, the tensor is wrapped in a one-element list.
     """
+
     def __init__(
             self,
             stream_url: str,
@@ -30,7 +31,7 @@ class DatasetClientIteratorAsync:
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
 
         # Delay creation of the async buffer until __aenter__
-        self._buffer: Optional[asyncio.Queue[np.ndarray]] = None
+        self._buffer: Optional[asyncio.Queue[List[np.ndarray]]] = None
         self._prefetch_task: Optional[asyncio.Task] = None
 
     async def __aenter__(self) -> 'DatasetClientIteratorAsync':
@@ -103,13 +104,9 @@ class DatasetClientIteratorAsync:
                 message = await self.ws.receive()
 
                 if message.type == aiohttp.WSMsgType.BINARY:
-                    # The server returns data shaped (n_to_prefetch, batch_size, seq_len)
-                    tensor_shape = (n_to_prefetch, self.batch_size, self.seq_len)
-                    data = np.frombuffer(message.data, dtype=self.data_type)
-                    data = data.reshape(tensor_shape)
-
-                    for i in range(n_to_prefetch):
-                        await self._buffer.put(data[i])
+                    batches = unpack_batches(message.data)
+                    for batch in batches:
+                        await self._buffer.put(batch)
 
                 elif message.type in {
                     aiohttp.WSMsgType.CLOSED,
@@ -126,10 +123,10 @@ class DatasetClientIteratorAsync:
         except Exception as e:
             print(f"Error in prefetch loop: {str(e)}")
 
-    def __aiter__(self) -> AsyncIterator[np.ndarray]:
+    def __aiter__(self) -> AsyncIterator[List[np.ndarray]]:
         return self
 
-    async def __anext__(self) -> np.ndarray:
+    async def __anext__(self) -> List[np.ndarray]:
         # If _buffer hasn't been created, something's wrong.
         if self._buffer is None:
             raise RuntimeError("Iterator not properly initialized.")
@@ -141,6 +138,7 @@ class DatasetClientIteratorSync:
     """
     Synchronous wrapper for DatasetClientIteratorAsync.
     """
+
     def __init__(self, stream_url: str, seed: int, batch_size: int, seq_len: int, prefetch_size: int = 32):
         self._async_iterator = DatasetClientIteratorAsync(
             stream_url, seed, batch_size, seq_len, prefetch_size
@@ -161,10 +159,10 @@ class DatasetClientIteratorSync:
             self._entered = False
         self._loop.close()
 
-    def __iter__(self) -> Iterator[np.ndarray]:
+    def __iter__(self) -> Iterator[List[np.ndarray]]:
         return self
 
-    def __next__(self) -> np.ndarray:
+    def __next__(self) -> List[np.ndarray]:
         try:
             return self._loop.run_until_complete(self._async_iterator.__anext__())
         except StopAsyncIteration:

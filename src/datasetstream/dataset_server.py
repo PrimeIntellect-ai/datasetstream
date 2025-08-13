@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from pathlib import Path
+from typing import List
 
 import numpy as np
 from aiohttp import web
@@ -8,7 +9,7 @@ from aiohttp import WSMsgType
 
 from datasetstream.config import ServerConfig, ServerState, ConfigError
 from datasetstream.dataset import TokenDataset, CompoundDataset, CompoundDatasetIterator
-from datasetstream.utils import get_np_dtype
+from datasetstream.utils import get_np_dtype, pack_batches, unpack_batches
 
 
 class DatasetServer:
@@ -25,7 +26,7 @@ class DatasetServer:
         self.datasets = {}
         for dataset_id, dataset_config in self.config.dataset_configs.items():
             self.datasets[dataset_id] = CompoundDataset(
-                [TokenDataset(file_path, dataset_config.token_size_bits) for file_path in dataset_config.data_files]
+                [TokenDataset(file_path, dataset_config.token_size_bits, dataset_config.tokenizer_config.document_separator_token) for file_path in dataset_config.data_files]
             )
 
         self.state = ServerState(self.config)
@@ -92,7 +93,7 @@ class DatasetServer:
         seq_len = int(seq_len_header)
 
         dataset = self.datasets[dataset_id]
-        dataset_iterator = CompoundDatasetIterator(dataset, batch_size, seq_len, seed, shuffle=False)
+        dataset_iterator = CompoundDatasetIterator(dataset, batch_size, seq_len, seed, shuffle=True)
 
         # Add connection to active connections
         self.state.increment_connections(dataset_id)
@@ -115,7 +116,6 @@ class DatasetServer:
             token_size_bytes = 4
         elif n_bits <= 64:
             token_size_bytes = 8
-        token_dtype = get_np_dtype(token_size_bytes)
 
         await ws.send_json({'token_size_bytes': token_size_bytes})
 
@@ -127,12 +127,13 @@ class DatasetServer:
                     req = msg.json()
                     n_prefetch = req.get("n_prefetch", 1)
 
-                    buffer = np.zeros((n_prefetch, batch_size, seq_len), dtype=token_dtype)
-                    for i in range(n_prefetch):
-                        next_batch: np.array = next(dataset_iterator)
-                        buffer[i] = next_batch
+                    batches: List[List[np.ndarray]] = []
+                    for _ in range(n_prefetch):
+                        next_batch = list(next(dataset_iterator))  # list of ndarrays
+                        batches.append(next_batch)
 
-                    await ws.send_bytes(buffer.tobytes())
+                    payload = pack_batches(batches)
+                    await ws.send_bytes(payload)
 
             elif msg.type == WSMsgType.ERROR:
                 print(f"ws connection closed with exception {ws.exception()}")

@@ -16,7 +16,7 @@ def test_dataset_basic_functionality():
         )
     )
 
-    dataset = TokenDataset(config.data_files[0], config.token_size_bits)
+    dataset = TokenDataset(config.data_files[0], config.token_size_bits, config.tokenizer_config.document_separator_token)
 
     # Test basic properties
     assert dataset.num_tokens > 0, "Dataset should not be empty"
@@ -45,7 +45,7 @@ def test_dataset_iterator():
         )
     )
 
-    dataset = TokenDataset(config.data_files[0], config.token_size_bits)
+    dataset = TokenDataset(config.data_files[0], config.token_size_bits, config.tokenizer_config.document_separator_token)
     iterator = TokenDatasetIterator(dataset, seq_len=64, seed=42, batch_size=32)
 
     # Test we can get multiple sequences

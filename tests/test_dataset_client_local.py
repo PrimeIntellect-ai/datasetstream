@@ -1,6 +1,5 @@
 import time
 
-import numpy as np
 import torch
 
 from src.datasetstream.dataset_client import DatasetClientIteratorSync
@@ -17,16 +16,14 @@ if __name__ == '__main__':
             print(f"Connected to dataset: {dataset_id}")
 
             count = 0
-            total_bytes_received = 0
 
-            item: np.array
             for tokens in iterator:
                 count += 1
-                total_bytes_received += tokens.nbytes
-                tokens = torch.from_numpy(tokens.astype(dtype=np.int64))
-                strings = detokenizer.detokenize(tokens)
-                for string in strings:
-                    print(string)
+                for batch in tokens:
+                    batch = torch.from_numpy(batch)
+                    strings = detokenizer.detokenize(batch)
+                    assert len(strings) == 1
+                    print(strings[0])
                     print("\033[31m--------------------------------\033[0m")
                 time.sleep(0.05)
 

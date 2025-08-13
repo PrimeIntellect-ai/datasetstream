@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import dataclass
 from typing import Optional, List
@@ -87,24 +88,24 @@ class DatasetConfig:
 class TokenDataset:
     """
     Memory mapped access to a token file that encodes tokens bit-by-bit
-    (instead of byte-per-token). This uses a read_n_bits approach
-    similar to the 'nibble' example but generalized to arbitrary bit
-    widths.
+    (instead of byte-per-token). Supports seeking to document boundaries and truncation.
     """
 
-    def __init__(self, data_file: Path, token_size_bits: int):
+    def __init__(self, data_file: Path, token_size_bits: int, document_separator_token: int):
         """
         Initialize a TokenDataset with direct parameters.
-        
+
         Args:
             data_file: Path to the data file
             token_size_bits: Number of bits per token
+            document_separator_token: The integer token marking document boundaries
         """
         if not os.path.isfile(data_file):
             raise ValueError(f"File not found: {data_file}")
 
         self.data_file = data_file
         self.n_bits = token_size_bits
+        self.document_separator_token = document_separator_token
 
         # Memory-map the file as raw bytes:
         self.data = np.memmap(data_file, dtype=np.uint8, mode='r')
@@ -114,36 +115,170 @@ class TokenDataset:
         total_bits = self.file_size_bytes * 8
         self.num_tokens = total_bits // self.n_bits
 
-    def read_sequence(self, start_byte_pos: int, seq_len: int) -> Optional[np.ndarray]:
+        self._build_doc_index()
+
+    # --- helpers ------------------------------------------------------------
+    def _lcm_bits_with_byte(self) -> int:
+        """Return LCM(self.n_bits, 8) in *bits* (period at which token & byte boundaries coincide)."""
+        return self.n_bits * 8 // math.gcd(self.n_bits, 8)
+
+    def _align_token_floor_byte_aligned(self, bit_idx: int) -> int:
+        """Floor to the closest <= bit index that is both a token boundary and a byte boundary."""
+        period_bits = self._lcm_bits_with_byte()
+        return (bit_idx // period_bits) * period_bits
+
+    def _build_doc_index(self, scan_block_bytes: int = 4096) -> None:
         """
-        Reads seq_len tokens starting at the first nibble that aligns with a byte boundary after start_byte_pos
-        or returns None if it doesn't fit.
+        Scan the file once and record the byte offset of the first token of each document
+        (i.e., the position immediately after each separator token). Offsets are floored to
+        bytes; read_sequence will align to the next token boundary when starting from these.
         """
+        period_bits = self._lcm_bits_with_byte()
+        period_bytes = period_bits // 8
+        block_bytes = max(period_bytes, (scan_block_bytes // period_bytes) * period_bytes or period_bytes)
+
+        doc_starts: list[int] = []
+        file_bits = self.file_size_bytes * 8
+        bit_offset = 0
+        byte_pos = 0
+
+        while byte_pos < self.file_size_bytes:
+            block_end = min(self.file_size_bytes, byte_pos + block_bytes)
+            if block_end <= byte_pos:
+                break
+
+            chunk = self.data[byte_pos:block_end]
+            tokens, _, _ = nibble_utils.read_nibbles(chunk.tobytes(), self.n_bits, carry=0, carry_bits=0)
+            if tokens:
+                for i, t in enumerate(tokens):
+                    if t == self.document_separator_token:
+                        sep_bit = bit_offset + (i + 1) * self.n_bits  # first token AFTER separator
+                        if sep_bit < file_bits:  # ignore trailing sep at EOF
+                            doc_starts.append(sep_bit // 8)
+                bit_offset += len(tokens) * self.n_bits
+
+            byte_pos = block_end
+
+        self.doc_start_bytes = np.array(doc_starts, dtype=np.uint64)
+        self.num_docs = int(self.doc_start_bytes.shape[0])
+
+    def read_sequence(self,
+                      start_byte_pos: int,
+                      seq_len: int,
+                      seek_document_start: bool = True,
+                      scan_block_bytes: int = 4096) -> Optional[np.ndarray]:
+        """
+        Reads up to seq_len tokens starting at the first token boundary at or after start_byte_pos.
+        If seek_document_start, scans forward in blocks until the next document separator token,
+        then begins reading immediately after that separator. Truncates at the next separator after reading.
+
+        IMPORTANT: We align the initial scan to the previous *byte-and-token-aligned* boundary and
+        then skip a small number of whole tokens to reach the true start bit. This avoids bit-offset
+        desynchronization that would otherwise cause separators to never be detected.
+
+        Args:
+            start_byte_pos: byte offset to begin scanning from
+            seq_len: maximum number of tokens to return
+            seek_document_start: if True, advance to the next separator first
+            scan_block_bytes: preferred block size in bytes for scanning (will be rounded down to a
+                               multiple of the LCM(n_bits,8)/8 so blocks end on token boundaries)
+
+        Returns:
+            A numpy array of tokens (length <= seq_len), or None if no valid start found.
+        """
+        # Validate position
         if start_byte_pos < 0 or start_byte_pos >= self.file_size_bytes:
             return None
-        # floor to nearest nibble start
-        num_nibbles = (start_byte_pos * 8) // self.n_bits
-        nibble_start_bit = num_nibbles * self.n_bits
 
-        # find the next bit where a nibble starts that aligns with a byte boundary
-        no_carry_start_bit = math_utils.next_common_multiple(self.n_bits, 8, nibble_start_bit)
+        # The first token boundary at or after start_byte_pos, expressed in bits
+        start_bit_token_aligned = ((start_byte_pos * 8 + self.n_bits - 1) // self.n_bits) * self.n_bits
 
-        chunk_start_pos = no_carry_start_bit // 8
+        # Align to a *byte-and-token* boundary at or before start_bit_token_aligned
+        period_bits = self._lcm_bits_with_byte()
+        period_bytes = period_bits // 8
+        floor_aligned_bit = self._align_token_floor_byte_aligned(start_bit_token_aligned)
+        byte_pos = floor_aligned_bit // 8
 
-        # compute num bytes to read to be (seq_len + 1) * n_bits ceil-ed to next byte
-        chunk_size = ((seq_len + 1) * self.n_bits + 7) // 8
+        # Number of whole tokens to skip from the floor-aligned boundary to the exact start bit
+        tokens_to_skip = (start_bit_token_aligned - floor_aligned_bit) // self.n_bits
 
-        chunk = self.data[chunk_start_pos: chunk_start_pos + chunk_size]
+        # Choose a block size that is a multiple of the token/byte period so each chunk ends at a token boundary
+        if scan_block_bytes < period_bytes:
+            block_bytes = period_bytes
+        else:
+            block_bytes = (scan_block_bytes // period_bytes) * period_bytes
+            if block_bytes == 0:
+                block_bytes = period_bytes
 
-        tokens, _, _ = nibble_utils.read_nibbles(chunk.tobytes(), self.n_bits,
-                                                 carry=0, carry_bits=0)
+        result: list[int] = []
+        seeking = seek_document_start
+        found_start_sep = not seek_document_start  # if we aren't seeking, we are already at start
 
-        if len(tokens) < seq_len:
+        # Stream through the file
+        while byte_pos < self.file_size_bytes and len(result) < seq_len:
+            block_end = min(self.file_size_bytes, byte_pos + block_bytes)
+            if block_end <= byte_pos:
+                break
+
+            chunk = self.data[byte_pos:block_end]
+            # Because blocks are chosen to be token-boundary aligned, we can decode cleanly each time.
+            tokens, _, _ = nibble_utils.read_nibbles(chunk.tobytes(), self.n_bits, carry=0, carry_bits=0)
+            if not tokens:
+                break
+
+            # On the very first bytes, skip whole tokens to reach the precise start bit
+            if tokens_to_skip:
+                if len(tokens) <= tokens_to_skip:
+                    tokens_to_skip -= len(tokens)
+                    byte_pos = block_end
+                    continue
+                else:
+                    tokens = tokens[tokens_to_skip:]
+                    tokens_to_skip = 0
+
+            # If we still need to find the *start* separator, look for it and drop everything up to and including it
+            if seeking:
+                # Find first separator in this token slice
+                try:
+                    idx = next(i for i, t in enumerate(tokens) if t == self.document_separator_token)
+                except StopIteration:
+                    # No separator here; advance
+                    byte_pos = block_end
+                    continue
+
+                # Move past the separator to the first token of the next document
+                tokens = tokens[idx + 1:]
+                found_start_sep = True
+                seeking = False
+
+            # Now we are in-Document: collect until the next separator or seq_len tokens
+            # Check for next separator inside this chunk
+            sep_idx = None
+            for i, t in enumerate(tokens):
+                if t == self.document_separator_token:
+                    sep_idx = i
+                    break
+
+            if sep_idx is not None:
+                tokens = tokens[:sep_idx]
+
+            # Append up to seq_len
+            if tokens:
+                take = min(seq_len - len(result), len(tokens))
+                result.extend(tokens[:take])
+
+            # If we hit a separator, we stop regardless of whether we've filled seq_len
+            if sep_idx is not None or len(result) >= seq_len:
+                break
+
+            byte_pos = block_end
+
+        if seek_document_start and not found_start_sep:
+            # We scanned to EOF without finding the beginning of a document
             return None
 
-        # Slice out exactly seq_len tokens:
-        tokens = tokens[:seq_len]
-        return np.array(tokens, dtype=np.int64)
+        return np.array(result, dtype=np.int64)
+
 
 
 class TokenDatasetIterator:
@@ -152,39 +287,51 @@ class TokenDatasetIterator:
     deals with bits internally. The interface is unchanged.
     """
 
-    def __init__(self, dataset: TokenDataset, batch_size: int, seq_len: int, seed: int, shuffle: bool = True):
+    def __init__(self, dataset: TokenDataset, batch_size: int, seq_len: int, seed: int, shuffle: bool = False):
         self.dataset = dataset
         self.batch_size = batch_size
         self.seq_len = seq_len
         self.shuffle = shuffle
         self.rng = Generator(PCG64(seed))
 
-        # Pre-generate positions if shuffle=False
+        # Pre-generate document indices if shuffle=False
         if not shuffle:
-            self.positions = self.rng.integers(0, self.dataset.file_size_bytes, self.batch_size)
+            if getattr(self.dataset, 'num_docs', 0) == 0:
+                raise ValueError("No documents found in dataset (no separators).")
+            # Start with deterministic, evenly spaced doc indices
+            self.positions = (np.arange(self.batch_size, dtype=np.int64) % self.dataset.num_docs)
 
-    def __next__(self) -> np.ndarray:
-        # We'll store the results in int64 for safety:
-        current_batch = np.zeros((self.batch_size, self.seq_len), dtype=np.int64)
+    def __next__(self) -> List[np.ndarray]:
+        # Collect a full batch
+        current_batch: List[np.ndarray] = []
 
-        # If shuffle, randomize positions each time
+        # Choose which documents to fetch
         if self.shuffle:
-            self.positions = self.rng.integers(0, self.dataset.file_size_bytes, self.batch_size)
+            if getattr(self.dataset, 'num_docs', 0) == 0:
+                raise ValueError("No documents found in dataset (no separators).")
+            doc_indices = self.rng.integers(0, self.dataset.num_docs, self.batch_size)
+        else:
+            doc_indices = self.positions
 
-        current_batch_size = 0
-        while current_batch_size < self.batch_size:
-            pos = int(self.positions[current_batch_size])
-            # Move pos to next document boundary:
-            seq = self.dataset.read_sequence(pos, self.seq_len)
-            if seq is not None:
-                current_batch[current_batch_size] = seq
+        i = 0
+        while i < self.batch_size:
+            doc_idx = int(doc_indices[i])
+            byte_pos = int(self.dataset.doc_start_bytes[doc_idx])
+
+            # Read starting at the *current* document start; do not skip to the next separator
+            seq = self.dataset.read_sequence(byte_pos, self.seq_len, seek_document_start=False)
+            if seq is not None and len(seq) > 0:
+                current_batch.append(seq)
                 if not self.shuffle:
-                    # Advance position by seq_len tokens next time
-                    self.positions[current_batch_size] += self.seq_len
-                current_batch_size += 1
+                    # Move to the next document deterministically (with wrap-around)
+                    self.positions[i] = (self.positions[i] + 1) % self.dataset.num_docs
+                i += 1
             else:
-                # If read_sequence fails, pick a new random position
-                self.positions[current_batch_size] = self.rng.integers(0, self.dataset.num_tokens)
+                # If the chosen doc is empty (e.g., trailing separator), pick another
+                if self.shuffle:
+                    doc_indices[i] = self.rng.integers(0, self.dataset.num_docs)
+                else:
+                    self.positions[i] = (self.positions[i] + 1) % self.dataset.num_docs
 
         return current_batch
 
@@ -213,7 +360,7 @@ class CompoundDatasetIterator:
     Iterator for a CompoundDataset that randomly samples from the underlying datasets.
     """
     
-    def __init__(self, dataset: CompoundDataset, batch_size: int, seq_len: int, seed: int, shuffle: bool = True):
+    def __init__(self, dataset: CompoundDataset, batch_size: int, seq_len: int, seed: int, shuffle: bool = False):
         """
         Initialize a CompoundDatasetIterator.
         
@@ -242,9 +389,9 @@ class CompoundDatasetIterator:
             for i in range(batch_size):
                 self.dataset_indices[i] = i % dataset.num_datasets
     
-    def __next__(self) -> np.ndarray:
+    def __next__(self) -> List[np.ndarray]:
         # We'll store the results in int64 for safety:
-        current_batch = np.zeros((self.batch_size, self.seq_len), dtype=np.int64)
+        current_batch = []
         
         # If shuffle, randomize dataset indices each time
         if self.shuffle:
@@ -255,6 +402,7 @@ class CompoundDatasetIterator:
         # Get sequences from each dataset
         for i in range(self.batch_size):
             dataset_idx = dataset_indices[i]
-            current_batch[i] = next(self.iterators[dataset_idx])
-        
+            next_seq = next(self.iterators[dataset_idx])[0]
+            current_batch.append(next_seq)
+
         return current_batch

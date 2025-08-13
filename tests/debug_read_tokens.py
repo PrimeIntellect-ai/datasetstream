@@ -19,7 +19,7 @@ def main():
         item: np.array
         for tokens in iterator:
             count += 1
-            total_bytes_received += tokens.nbytes
+            total_bytes_received += sum(item.nbytes for batch in tokens for item in batch)
             end_time = time.perf_counter()
             time_elapsed = end_time - start_time
             print(f"Average speed: {total_bytes_received / time_elapsed / (1024 ** 2):.2f} MB/s, "
