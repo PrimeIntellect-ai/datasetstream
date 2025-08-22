@@ -3,8 +3,8 @@
     "port": 8080,
     "datasets_dir": "data",
     "datasets": {
-        "fineweb_edu_val": {
-            "data_files": ["fineweb-edu-sample/val_1.bin"],
+        "fineweb_edu_sample": {
+            "data_files": ["fineweb-edu-sample/train_0.bin", "fineweb-edu-sample/train_1.bin", "fineweb-edu-sample/train_2.bin"],
             "token_size_bits": 17,
             "tokenizer": {
                 "document_separator_token": 128001,
@@ -12,4 +12,4 @@
             }
         }
     }
-} 
+}

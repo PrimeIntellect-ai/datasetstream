@@ -6,7 +6,7 @@ from datasetstream.dataset_client import DatasetClientIteratorSync
 
 
 def main():
-    dataset_id = "fineweb_edu_val"
+    dataset_id = "fineweb_edu_sample"
     stream_url = f"http://localhost:8080/api/v1/datasets/{dataset_id}/stream"
 
     start_time = time.perf_counter()

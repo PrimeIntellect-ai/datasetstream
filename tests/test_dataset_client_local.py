@@ -7,7 +7,7 @@ from src.datasetstream.tokenizer.detokenizer import HuggingfaceDetokenizer
 
 if __name__ == '__main__':
     def test():
-        dataset_id = "fineweb_edu_val"
+        dataset_id = "fineweb_edu_sample"
         stream_url = f"http://localhost:8080/api/v1/datasets/{dataset_id}/stream"
 
         # OpenWebText was encoded with the original GPT-2 tokenizer
