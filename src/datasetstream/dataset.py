@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from numpy.random import Generator, PCG64
 
-from datasetstream import nibble_utils, math_utils
+from datasetstream import nibble_utils
 
 
 @dataclass
@@ -87,8 +87,8 @@ class DatasetConfig:
 
 class TokenDataset:
     """
-    Memory mapped access to a token file that encodes tokens bit-by-bit
-    (instead of byte-per-token). Supports scanning to document boundaries and truncation.
+    Memory mapped access to a token file that encodes tokens bit-by-bit.
+    Supports scanning to document boundaries and truncation.
     """
 
     def __init__(self, data_file: Path, token_size_bits: int, document_separator_token: int):
@@ -130,20 +130,23 @@ class TokenDataset:
                       start_byte_pos: int,
                       seq_len: int,
                       seek_document_start: bool = True,
+                      stop_at_seq_end: bool = True,
                       scan_block_bytes: int = 4096) -> Optional[np.ndarray]:
         """
-        (Kept for compatibility.) Reads up to seq_len tokens starting at the first token boundary
+        Reads up to seq_len tokens starting at the first token boundary
         at or after start_byte_pos. If seek_document_start, scans forward in blocks until the next
         document separator token, then begins reading immediately after that separator. Truncates
         at the next separator after reading. Returns tokens or None if no start found.
         """
-        out, _ = self.read_next_sequence(start_byte_pos, seq_len, seek_document_start, scan_block_bytes)
+        out, _ = self.read_next_sequence(start_byte_pos, seq_len, seek_document_start, stop_at_seq_end,
+                                         scan_block_bytes)
         return out
 
     def read_next_sequence(self,
                            start_byte_pos: int,
                            seq_len: int,
                            seek_document_start: bool = True,
+                           stop_at_document_end: bool = True,
                            scan_block_bytes: int = 4096) -> Tuple[Optional[np.ndarray], int]:
         """
         Streaming-friendly read that also returns the **next cursor** to continue from.
@@ -231,7 +234,7 @@ class TokenDataset:
             # Now we are inside a document: collect until the next separator or seq_len tokens
             sep_rel = None
             for i, t in enumerate(tokens):
-                if t == self.document_separator_token:
+                if t == self.document_separator_token and stop_at_document_end:
                     sep_rel = i
                     break
 
@@ -279,12 +282,16 @@ class TokenDatasetIterator:
     Maintains a per-stream byte cursor instead of a prebuilt document index.
     """
 
-    def __init__(self, dataset: TokenDataset, batch_size: int, seq_len: int, seed: int, shuffle: bool = False):
+    def __init__(self, dataset: TokenDataset, batch_size: int, seq_len: int, seed: int,
+                 shuffle: bool = True, seek_document_start: bool = True, stop_at_document_end: bool = True):
         self.dataset = dataset
         self.batch_size = batch_size
         self.seq_len = seq_len
         self.shuffle = shuffle
         self.rng = Generator(PCG64(seed))
+
+        self.seek_document_start = seek_document_start
+        self.stop_at_document_end = stop_at_document_end
 
         # Per-slot byte cursors for deterministic streaming
         if not shuffle:
@@ -309,7 +316,8 @@ class TokenDatasetIterator:
             seq, next_cursor = self.dataset.read_next_sequence(
                 start_byte_pos=start_pos,
                 seq_len=self.seq_len,
-                seek_document_start=True,          # always hop to the next doc boundary
+                seek_document_start=self.seek_document_start,  # always hop to the next doc boundary
+                stop_at_document_end=self.stop_at_document_end,
                 scan_block_bytes=4096
             )
 
@@ -337,6 +345,7 @@ class CompoundDataset:
     """
     A dataset that combines multiple TokenDatasets and allows sampling from them.
     """
+
     def __init__(self, datasets: List[TokenDataset]):
         if not datasets:
             raise ValueError("CompoundDataset requires at least one TokenDataset")
@@ -349,7 +358,9 @@ class CompoundDatasetIterator:
     Iterator for a CompoundDataset that randomly samples from the underlying datasets.
     Uses on-the-fly scanning; no precomputed indices.
     """
-    def __init__(self, dataset: CompoundDataset, batch_size: int, seq_len: int, seed: int, shuffle: bool = False):
+
+    def __init__(self, dataset: CompoundDataset, batch_size: int, seq_len: int, seed: int, shuffle: bool = True,
+                 seek_document_start: bool = True, stop_at_document_end: bool = True):
         self.dataset = dataset
         self.batch_size = batch_size
         self.seq_len = seq_len
@@ -358,7 +369,7 @@ class CompoundDatasetIterator:
 
         # Create per-dataset iterators (each yields 1 sequence per __next__)
         self.iterators = [
-            TokenDatasetIterator(ds, 1, seq_len, seed, shuffle)
+            TokenDatasetIterator(ds, 1, seq_len, seed, shuffle, seek_document_start, stop_at_document_end)
             for ds in dataset.datasets
         ]
 

@@ -20,12 +20,20 @@ class DatasetClientIteratorAsync:
             batch_size: int,
             seq_len: int,
             prefetch_size: int = 32,
+
+            shuffle: bool = True,
+            seek_document_start: bool = True,
+            stop_at_document_end: bool = True
     ):
         self.stream_url = stream_url
         self.seed = seed
         self.batch_size = batch_size
         self.seq_len = seq_len
         self.prefetch_size = prefetch_size
+
+        self.shuffle = shuffle
+        self.seek_document_start = seek_document_start
+        self.stop_at_document_end = stop_at_document_end
 
         self.session: Optional[aiohttp.ClientSession] = None
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
@@ -47,6 +55,9 @@ class DatasetClientIteratorAsync:
                     'X-Iterator-Seed': str(self.seed),
                     'X-Iterator-BatchSize': str(self.batch_size),
                     'X-Iterator-SeqLen': str(self.seq_len),
+                    'X-Iterator-Shuffle': "true" if self.shuffle else "false",
+                    'X-Iterator-SeekDocumentStart': "true" if self.seek_document_start else "false",
+                    'X-Iterator-StopAtDocumentEnd': "true" if self.stop_at_document_end else "false"
                 },
                 max_msg_size=1024 * 1024 * 1024
             )

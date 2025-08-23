@@ -92,8 +92,16 @@ class DatasetServer:
         batch_size = int(batch_size_header)
         seq_len = int(seq_len_header)
 
+        shuffle_header = request.headers.get("X-Iterator-Shuffle")
+        seek_document_start_header = request.headers.get("X-Iterator-SeekDocumentStart")
+        stop_at_document_end_header = request.headers.get("X-Iterator-StopAtDocumentEnd")
+
+        shuffle = (shuffle_header == "true")
+        seek_document_start = (seek_document_start_header == "true")
+        stop_at_document_end = (stop_at_document_end_header == "true")
+
         dataset = self.datasets[dataset_id]
-        dataset_iterator = CompoundDatasetIterator(dataset, batch_size, seq_len, seed, shuffle=True)
+        dataset_iterator = CompoundDatasetIterator(dataset, batch_size, seq_len, seed, shuffle=shuffle, seek_document_start=seek_document_start, stop_at_document_end=stop_at_document_end)
 
         # Add connection to active connections
         self.state.increment_connections(dataset_id)
