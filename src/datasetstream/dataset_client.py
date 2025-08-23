@@ -150,9 +150,13 @@ class DatasetClientIteratorSync:
     Synchronous wrapper for DatasetClientIteratorAsync.
     """
 
-    def __init__(self, stream_url: str, seed: int, batch_size: int, seq_len: int, prefetch_size: int = 32):
+    def __init__(self, stream_url: str, seed: int, batch_size: int, seq_len: int, prefetch_size: int = 32,
+                 shuffle: bool = True,
+                 seek_document_start: bool = True,
+                 stop_at_document_end: bool = True):
         self._async_iterator = DatasetClientIteratorAsync(
-            stream_url, seed, batch_size, seq_len, prefetch_size
+            stream_url, seed, batch_size, seq_len, prefetch_size,
+            shuffle, seek_document_start, stop_at_document_end
         )
         self._loop = asyncio.new_event_loop()
         self._entered = False

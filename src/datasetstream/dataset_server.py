@@ -109,7 +109,7 @@ class DatasetServer:
         ws = web.WebSocketResponse(max_msg_size=1024 * 1024 * 1024) # insane max size; RFC says this is fine. Sue me
         await ws.prepare(request)
 
-        print(f"New connection to dataset {dataset_id} with seed={seed}, batch_size={batch_size}")
+        print(f"New connection to dataset {dataset_id} with seed={seed}, batch_size={batch_size}, seq_len={seq_len}, shuffle={shuffle}, seek_document_start={seek_document_start}, stop_at_document_end={stop_at_document_end}")
 
         # determine token size in bytes
         dataset_config = self.config.dataset_configs[dataset_id]

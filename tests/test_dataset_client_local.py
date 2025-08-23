@@ -12,7 +12,7 @@ if __name__ == '__main__':
 
         # OpenWebText was encoded with the original GPT-2 tokenizer
         detokenizer = HuggingfaceDetokenizer.from_hf("meta-llama/Meta-Llama-3-8B")
-        with DatasetClientIteratorSync(stream_url, seed=42, batch_size=32, seq_len=1024) as iterator:
+        with DatasetClientIteratorSync(stream_url, seed=42, batch_size=32, seq_len=1024, stop_at_document_end=False) as iterator:
             print(f"Connected to dataset: {dataset_id}")
 
             count = 0
